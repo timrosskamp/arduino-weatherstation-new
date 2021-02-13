@@ -20,24 +20,9 @@ See more at http://blog.squix.ch
 
 #include <simpleDSTadjust.h>
 
-// Setup
-#define WIFI_SSID ""
-#define WIFI_PASS ""
-#define WIFI_HOSTNAME "arduino-weather-station"
-
 const int UPDATE_INTERVAL_SECS = 10 * 60; // Update every 10 minutes
 const int SLEEP_INTERVAL_SECS = 0;        // Going to sleep after idle times, set 0 for insomnia
 
-
-// OpenWeatherMap Settings
-// Sign up here to get an API key: https://docs.thingpulse.com/how-tos/openweathermap-key/
-String OPEN_WEATHER_MAP_APP_ID = "";
-/*
-Go to https://openweathermap.org/find?q= and search for a location.
- */
-float OPEN_WEATHER_MAP_LOCATTION_LAT = 53.1667;
-float OPEN_WEATHER_MAP_LOCATTION_LON = 8.2;
-String DISPLAYED_CITY_NAME = "Oldenburg";
 /*
 Arabic -> ar, Bulgarian -> bg, Catalan -> ca, Czech -> cz, German -> de, Greek -> el,
 English -> en, Persian (Farsi) -> fa, Finnish -> fi, French -> fr, Galician -> gl,
