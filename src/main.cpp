@@ -50,6 +50,17 @@ simpleDSTadjust dstAdjusted(StartRule, EndRule);
 
 
 
+int screen = 0;
+int screenCount = 2;
+
+long lastDownloadUpdate = millis();
+
+unsigned long lastPressed;
+int wait = 200;
+
+
+
+
 // Progress bar helper
 void writeProgress(uint8_t percentage, String text) {
     gfx.fillBuffer(COLOR_BLACK);
@@ -218,11 +229,99 @@ void drawForecastColumn(uint16_t x, uint16_t y, uint8_t dayIndex) {
     }
 }
 
-int screen = 0;
-int screenCount = 2;
+/**
+ * Smooth interpolation between y1 and y2.
+ * 
+ * http://paulbourke.net/miscellaneous/interpolation/
+ */
+float interpolate(float y0, float y1, float y2, float y3, float mu) {
+   float mu2 = mu * mu;
+   float a0 = -0.5 * y0 + 1.5 * y1 - 1.5 * y2 + 0.5 * y3;
+   float a1 = y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3;
+   float a2 = -0.5 * y0 + 0.5 * y2;
+   float a3 = y1;
 
-unsigned long lastPressed;
-int wait = 200;
+   return (a0 * mu * mu2 + a1 * mu2 + a2 * mu + a3);
+}
+
+void drawHourlyForecastGraph() {
+    gfx.setColor(COLOR_BLUE);
+
+    float tmin = weather.hourly[0].temp;
+    float tmax = weather.hourly[0].temp;
+
+    for( int b = 1; b < 25; b++ ){
+        float t = weather.hourly[b].temp;
+
+        if( tmin > t ){
+            tmin = t;
+        }
+
+        if( tmax < t ){
+            tmax = t;
+        }
+    }
+
+    // temperature delta
+    float tdelta = fabs(tmax - tmin);
+    // stretch factor for the graph. 1° = 3px, but 40px is max height.
+    float tscale = min(3, 40 / tdelta);
+
+    // y-coord for every temperature each hour.
+    float tycoords[25] = {};
+
+    for( int b = 0; b < 25; b++ ){
+        float t = weather.hourly[b].temp;
+        tycoords[b] = 240 - (t - tmin) * tscale;
+    }
+
+    for( int b = 0; b < 24; b++ ){
+        for( int l = 0; l < 10; l++ ){
+            int x = b * 10 + l;
+            float mu = (float) l / 9;
+            float y0 = tycoords[max(0, b - 1)];
+            float y1 = tycoords[b];
+            float y2 = tycoords[b + 1];
+            float y3 = tycoords[min(23, b + 2)];
+
+            int y = interpolate(y0, y1, y2, y3, mu);
+
+            gfx.drawVerticalLine(x, y, 320 - y);
+        }
+    }
+
+    gfx.setColor(COLOR_WHITE);
+    gfx.setFont(ArialRoundedMTBold_14);
+    gfx.setTextAlignment(TEXT_ALIGN_CENTER);
+
+    for( int i = 0; i < 6; i++ ){
+        // index in the forecast array
+        int j = i * 4 + 2;
+        float t = weather.hourly[j].temp;
+        // minimum y-coord in current, last and next temperature
+        int tymin = min(min(tycoords[j], tycoords[j+1]), tycoords[j-1]);
+        int x = i * 40 + 20;
+
+        gfx.drawString(x, tymin - 20, String(t, 0));
+    }
+
+    gfx.setTransparentColor(COLOR_BLUE);
+    gfx.setColor(COLOR_BLACK);
+
+    char time_str[11];
+
+    for( int i = 0; i < 3; i++ ){
+        int j = i * 8 + 4;
+        time_t time = weather.hourly[j].dt;
+        struct tm *timeinfo = localtime(&time);
+        int x = i * 80 + 40;
+
+        sprintf(time_str, "%02d:%02d\n", timeinfo->tm_hour, timeinfo->tm_min);
+        gfx.drawString(x, 300, time_str);
+    }
+
+    gfx.setTransparentColor(COLOR_BLACK);
+}
 
 void buttonPressed() {
     screen = (screen + 1) % screenCount;
@@ -263,6 +362,7 @@ void loop() {
         drawWifiQuality();
         drawTime();
         drawCurrentWeather();
+        drawHourlyForecastGraph();
     }else if( screen == 1 ){
         drawWifiQuality();
         drawForecastColumn(10, 60, 1);
@@ -274,4 +374,10 @@ void loop() {
     }
 
     gfx.commit();
+
+    // Check if we should update weather information
+    if( millis() - lastDownloadUpdate > 1000 * UPDATE_INTERVAL_SECS ){
+        updateData();
+        lastDownloadUpdate = millis();
+    }
 }
