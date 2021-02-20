@@ -5,6 +5,7 @@
 #include <ESP8266WiFi.h>
 #include <MiniGrafx.h>
 #include <ILI9341_SPI.h>
+#include <IoAbstraction.h>
 #include "OpenWeatherMapOneCall.h"
 
 #include "ArialRounded.h"
@@ -34,23 +35,18 @@ int BITS_PER_PIXEL = 2; // 2^2 = 4 colors
 
 ADC_MODE(ADC_VCC);
 
+IoAbstractionRef ioDevice = ioUsingArduino();
+
 ILI9341_SPI tft = ILI9341_SPI(TFT_CS, TFT_DC);
 MiniGrafx gfx = MiniGrafx(&tft, BITS_PER_PIXEL, palette);
 
 OpenWeatherMapOneCallData weather;
 
 time_t now;
-tm tm;
+tm timeinfo;
 
 int screen = 0;
 int screenCount = 2;
-
-long lastDownloadUpdate = millis();
-
-unsigned long lastPressed;
-int wait = 200;
-
-
 
 
 // Progress bar helper
@@ -163,16 +159,16 @@ void drawTime() {
     char time_str[11];
 
     time(&now);
-    localtime_r(&now, &tm);
+    localtime_r(&now, &timeinfo);
 
     gfx.setTextAlignment(TEXT_ALIGN_CENTER);
     gfx.setFont(ArialRoundedMTBold_14);
     gfx.setColor(COLOR_WHITE);
-    String date = WDAY_NAMES[tm.tm_wday] + " " + MONTH_NAMES[tm.tm_mon] + " " + String(tm.tm_mday) + " " + String(1900 + tm.tm_year);
+    String date = WDAY_NAMES[timeinfo.tm_wday] + " " + MONTH_NAMES[timeinfo.tm_mon] + " " + String(timeinfo.tm_mday) + " " + String(1900 + timeinfo.tm_year);
     gfx.drawString(120, 21, date);
 
     gfx.setFont(ArialRoundedMTBold_36);
-    sprintf(time_str, "%02d:%02d\n", tm.tm_hour, tm.tm_min);
+    sprintf(time_str, "%02d:%02d\n", timeinfo.tm_hour, timeinfo.tm_min);
     gfx.drawString(120, 35, time_str);
 }
 
@@ -295,48 +291,7 @@ void drawHourlyForecastGraph() {
     gfx.setTransparentColor(COLOR_BLACK);
 }
 
-void buttonPressed() {
-    screen = (screen + 1) % screenCount;
-}
-
-void ICACHE_RAM_ATTR handleInterrupt() {
-    unsigned long now = millis();
-    
-    if( lastPressed + wait < now ){
-        buttonPressed();
-        lastPressed = now;
-    }
-}
-
-void setup() {
-    Serial.begin(115200);
-
-    pinMode(D4, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(D4), handleInterrupt, FALLING);
-
-    // Turn on the background LED
-    pinMode(TFT_LED, OUTPUT);
-    digitalWrite(TFT_LED, HIGH); // HIGH to Turn on;
-
-    gfx.init();
-    gfx.fillBuffer(COLOR_BLACK);
-    gfx.commit();
-
-    configTime(LOCAL_TIMEZONE, NTP_SERVERS);
-
-    connectWifi();
-
-    // wait until time is valid
-    while( time(&now) < NTP_MIN_VALID_EPOCH ){
-        delay(300);
-    }
-
-    Serial.println("Current time: " + String(now));
-
-    updateData();
-}
-
-void loop() {
+void drawScreen() {
     gfx.fillBuffer(COLOR_BLACK);
 
     if( screen == 0 ){
@@ -355,10 +310,54 @@ void loop() {
     }
 
     gfx.commit();
+}
 
-    // Check if we should update weather information
-    if( millis() - lastDownloadUpdate > 1000 * UPDATE_INTERVAL_SECS ){
-        updateData();
-        lastDownloadUpdate = millis();
+void setup() {
+    Serial.begin(115200);
+
+    ioDevicePinMode(ioDevice, TFT_LED, OUTPUT);
+    switches.initialise(ioDevice, true);
+
+    // Turn on the background LED
+    ioDeviceDigitalWriteS(ioDevice, TFT_LED, HIGH);
+
+    gfx.init();
+    gfx.fillBuffer(COLOR_BLACK);
+    gfx.commit();
+
+    configTime(LOCAL_TIMEZONE, NTP_SERVERS);
+
+    connectWifi();
+
+    // wait until time is valid
+    while( time(&now) < NTP_MIN_VALID_EPOCH ){
+        delay(300);
     }
+
+    Serial.println("Current time: " + String(now));
+
+    updateData();
+    drawScreen();
+
+    switches.addSwitch(D4, [](uint8_t pin, bool held){
+        if( held ){
+            ESP.deepSleep(0);
+        }else{
+            screen = (screen + 1) % screenCount;
+            drawScreen();
+        }
+    });
+
+    taskManager.scheduleFixedRate(10, []{
+		drawScreen();
+	}, TIME_SECONDS);
+
+    taskManager.scheduleFixedRate(UPDATE_INTERVAL_SECS, []{
+		updateData();
+        drawScreen();
+	}, TIME_SECONDS);
+}
+
+void loop() {
+    taskManager.runLoop();
 }
