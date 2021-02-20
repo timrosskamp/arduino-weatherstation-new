@@ -5,7 +5,6 @@
 #include <ESP8266WiFi.h>
 #include <MiniGrafx.h>
 #include <ILI9341_SPI.h>
-#include <simpleDSTadjust.h>
 #include "OpenWeatherMapOneCall.h"
 
 #include "ArialRounded.h"
@@ -33,22 +32,15 @@ int SCREEN_HEIGHT = 320;
 // Limited to 4 colors due to memory constraints
 int BITS_PER_PIXEL = 2; // 2^2 = 4 colors
 
-time_t dstOffset = 0;
-
-
 ADC_MODE(ADC_VCC);
-
-
-
 
 ILI9341_SPI tft = ILI9341_SPI(TFT_CS, TFT_DC);
 MiniGrafx gfx = MiniGrafx(&tft, BITS_PER_PIXEL, palette);
 
 OpenWeatherMapOneCallData weather;
-simpleDSTadjust dstAdjusted(StartRule, EndRule);
 
-
-
+time_t now;
+tm tm;
 
 int screen = 0;
 int screenCount = 2;
@@ -105,22 +97,6 @@ void connectWifi() {
     delay(1000);
 }
 
-void updateTimeData() {
-    time_t now;
-
-    configTime(UTC_OFFSET * 3600, 0, NTP_SERVERS);
-
-    while( (now = time(nullptr)) < NTP_MIN_VALID_EPOCH ){
-        delay(300);
-    }
-    
-    Serial.printf("Current time: %d\n", now);
-
-    // calculate for time calculation how much the dst class adds.
-    dstOffset = UTC_OFFSET * 3600 + dstAdjusted.time(nullptr) - now;
-    Serial.printf("Time difference for DST: %d\n", dstOffset);
-}
-
 void updateWeatherData() {
     OpenWeatherMapOneCall *oneCallClient = new OpenWeatherMapOneCall();
     oneCallClient->setMetric(IS_METRIC);
@@ -129,10 +105,6 @@ void updateWeatherData() {
 }
 
 void updateData() {
-    writeProgress(10, "Updating time...");
-
-    updateTimeData();
-
     writeProgress(50, "Updating weather...");
 
     updateWeatherData();
@@ -188,20 +160,20 @@ void drawCurrentWeather() {
 
 // draws the clock
 void drawTime() {
-  char time_str[11];
-  char *dstAbbrev;
-  time_t now = dstAdjusted.time(&dstAbbrev);
-  struct tm *timeinfo = localtime(&now);
+    char time_str[11];
 
-  gfx.setTextAlignment(TEXT_ALIGN_CENTER);
-  gfx.setFont(ArialRoundedMTBold_14);
-  gfx.setColor(COLOR_WHITE);
-  String date = WDAY_NAMES[timeinfo->tm_wday] + " " + MONTH_NAMES[timeinfo->tm_mon] + " " + String(timeinfo->tm_mday) + " " + String(1900 + timeinfo->tm_year);
-  gfx.drawString(120, 21, date);
+    time(&now);
+    localtime_r(&now, &tm);
 
-  gfx.setFont(ArialRoundedMTBold_36);
-  sprintf(time_str, "%02d:%02d\n", timeinfo->tm_hour, timeinfo->tm_min);
-  gfx.drawString(120, 35, time_str);
+    gfx.setTextAlignment(TEXT_ALIGN_CENTER);
+    gfx.setFont(ArialRoundedMTBold_14);
+    gfx.setColor(COLOR_WHITE);
+    String date = WDAY_NAMES[tm.tm_wday] + " " + MONTH_NAMES[tm.tm_mon] + " " + String(tm.tm_mday) + " " + String(1900 + tm.tm_year);
+    gfx.drawString(120, 21, date);
+
+    gfx.setFont(ArialRoundedMTBold_36);
+    sprintf(time_str, "%02d:%02d\n", tm.tm_hour, tm.tm_min);
+    gfx.drawString(120, 35, time_str);
 }
 
 void drawForecastColumn(uint16_t x, uint16_t y, uint8_t dayIndex) {
@@ -350,7 +322,16 @@ void setup() {
     gfx.fillBuffer(COLOR_BLACK);
     gfx.commit();
 
+    configTime(LOCAL_TIMEZONE, NTP_SERVERS);
+
     connectWifi();
+
+    // wait until time is valid
+    while( time(&now) < NTP_MIN_VALID_EPOCH ){
+        delay(300);
+    }
+
+    Serial.println("Current time: " + String(now));
 
     updateData();
 }
