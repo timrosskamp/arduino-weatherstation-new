@@ -18,6 +18,7 @@
 
 
 
+#define COLOR_BLUE   0x03BF // 0, 120, 255
 #define COLOR_YELLOW 0xFD40 // 255, 172, 7
 #define COLOR_PURPLE 0x6136 // 104, 38, 183
 
@@ -30,8 +31,14 @@ OpenWeatherMapOneCallData weather;
 time_t now;
 tm timeinfo;
 
-int screen = 0;
-int screenCount = 2;
+enum Screens {
+    Progress,
+    Weather,
+    Forecast
+};
+
+Screens screen = Weather;
+int screenCount = 3;
 
 
 
@@ -175,17 +182,35 @@ void drawBmp(String filename, uint16_t x, uint16_t y, TFT_eSPI *_tft) {
     bmpFS.close();
 }
 
+String lastProgressText;
+uint8_t lastProgressPercentage;
+
 // Progress bar helper
 void drawProgress(uint8_t percentage, String text) {
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextDatum(BC_DATUM);
-    tft.loadFont(AA_FONT_SMALL, LittleFS);
-    tft.drawString(text, 120, 160);
+    if( screen != Progress ){
+        tft.fillScreen(TFT_BLACK);
+    }
+    
+    if( lastProgressText != text ){
+        tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        tft.setTextDatum(BC_DATUM);
+        tft.loadFont(AA_FONT_SMALL, LittleFS);
+        tft.fillRect(0, 144, 240, 16, TFT_BLACK);
+        tft.drawString(text, 120, 160);
+        tft.unloadFont();
+        lastProgressText = text;
+    }
+
+    if( lastProgressPercentage > percentage ){
+        tft.fillRect(12, 170, 216, 11, TFT_BLACK); // Clear Bar
+    }
 
     tft.drawRoundRect(10, 168, 220, 15, 4, TFT_WHITE);
-    tft.fillRoundRect(12, 170, 216 * percentage / 100.0, 11, 2, TFT_BLUE);
+    tft.fillRoundRect(12, 170, 216 * percentage / 100.0, 11, 2, COLOR_BLUE);
 
-    tft.unloadFont();
+    lastProgressPercentage = percentage;
+    
+    screen = Progress;
 }
 
 void connectWifi() {
@@ -203,13 +228,11 @@ void connectWifi() {
     while( WiFi.status() != WL_CONNECTED ){
         delay(500);
         if( i > 80 ) i = 0;
-        tft.fillScreen(TFT_BLACK);
         drawProgress(i, "Connecting to WiFi...");
         i += 10;
         Serial.print(".");
     }
 
-    tft.fillScreen(TFT_BLACK);
     drawProgress(100, "Connected to WiFi.");
 
     Serial.println();
@@ -227,7 +250,6 @@ void updateWeatherData() {
 }
 
 void updateData() {
-    tft.fillScreen(TFT_BLACK);
     drawProgress(50, "Updating weather...");
 
     updateWeatherData();
@@ -265,7 +287,7 @@ void drawCurrentWeather() {
 
     tft.loadFont(AA_FONT_SMALL, LittleFS);
     tft.setTextDatum(TR_DATUM);
-    tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    tft.setTextColor(COLOR_BLUE, TFT_BLACK);
     tft.drawString(DISPLAYED_CITY_NAME, 220, 95);
 
     tft.loadFont(AA_FONT_LARGE, LittleFS);
@@ -279,10 +301,20 @@ void drawCurrentWeather() {
     tft.unloadFont();
 }
 
-// draws the clock
-void drawTime() {
+void drawClock() {
     char time_str[11];
 
+    tft.setTextDatum(TC_DATUM);
+    tft.loadFont(AA_FONT_LARGE, LittleFS);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    sprintf(time_str, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+    tft.fillRect(60, 36, 120, 38, TFT_BLACK);
+    tft.drawString(time_str, 120, 37);
+
+    tft.unloadFont();
+}
+
+void drawTime() {
     time(&now);
     localtime_r(&now, &timeinfo);
 
@@ -292,13 +324,16 @@ void drawTime() {
     String date = WDAY_NAMES[timeinfo.tm_wday] + ", " + String(timeinfo.tm_mday) + ". " + MONTH_NAMES[timeinfo.tm_mon] + " " + String(1900 + timeinfo.tm_year);
     tft.drawString(date, 120, 21);
 
-    tft.setTextDatum(TC_DATUM);
-    tft.loadFont(AA_FONT_LARGE, LittleFS);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    sprintf(time_str, "%02d:%02d\n", timeinfo.tm_hour, timeinfo.tm_min);
-    tft.drawString(time_str, 120, 37);
-
     tft.unloadFont();
+
+    drawClock();
+}
+
+void updateTime() {
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    drawClock();
 }
 
 void drawForecastColumn(uint16_t x, uint16_t y, uint8_t dayIndex) {
@@ -313,12 +348,12 @@ void drawForecastColumn(uint16_t x, uint16_t y, uint8_t dayIndex) {
 
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
     tft.drawString(String(day.tempDay, 0) + " C", x + 25, y + 5);
-    tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    tft.setTextColor(COLOR_BLUE, TFT_BLACK);
     tft.drawString(String(day.tempNight, 0) + " C", x + 25, y + 20);
 
     drawBmp(getIconForWeatherId(day.weatherId, false), x, y + 35, &tft);
 
-    tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    tft.setTextColor(COLOR_BLUE, TFT_BLACK);
 
     if( day.snow ){
         tft.drawString(String(day.snow, 1) + "mm", x + 25, y + 80);
@@ -385,7 +420,7 @@ void drawHourlyForecastGraph() {
             int y = interpolate(y0, y1, y2, y3, mu);
 
             // gfx.drawVerticalLine(x, y, 320 - y);
-            tft.drawLine(x, y, x, 320, TFT_BLUE);
+            tft.drawLine(x, y, x, 320, COLOR_BLUE);
         }
     }
 
@@ -404,7 +439,7 @@ void drawHourlyForecastGraph() {
         tft.drawString(String(t, 0), x, tymin - 10);
     }
 
-    tft.setTextColor(TFT_WHITE, TFT_BLUE);
+    tft.setTextColor(TFT_WHITE, COLOR_BLUE);
 
     char time_str[11];
 
@@ -424,12 +459,12 @@ void drawHourlyForecastGraph() {
 void drawScreen() {
     tft.fillScreen(TFT_BLACK);
 
-    if( screen == 0 ){
+    if( screen == Weather ){
         drawWifiQuality();
         drawTime();
         drawCurrentWeather();
         drawHourlyForecastGraph();
-    }else if( screen == 1 ){
+    }else if( screen == Forecast ){
         drawWifiQuality();
         drawForecastColumn(10, 60, 1);
         drawForecastColumn(95, 60, 2);
@@ -479,23 +514,41 @@ void setup() {
     Serial.println("Current time: " + String(now));
 
     updateData();
+    screen = Weather;
     drawScreen();
 
     switches.addSwitch(D4, [](uint8_t pin, bool held){
         if( held ){
             ESP.deepSleep(0);
         }else{
-            screen = (screen + 1) % screenCount;
-            drawScreen();
+            if( screen == Weather ){
+                screen = Forecast;
+                drawScreen();
+            }else if( screen == Forecast ){
+                screen = Weather;
+                drawScreen();
+            }
         }
     });
 
-    taskManager.scheduleFixedRate(10, []{
-		drawScreen();
-	}, TIME_SECONDS);
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    // Wait until a minute just passed.
+    taskManager.scheduleOnce((unsigned int) 62 - timeinfo.tm_sec, []{
+        if( screen == Weather ){
+            updateTime();
+        }
+        taskManager.scheduleFixedRate(60, []{
+            if( screen == Weather ){
+                updateTime();
+            }
+        }, TIME_SECONDS);
+    }, TIME_SECONDS);
 
     taskManager.scheduleFixedRate(UPDATE_INTERVAL_SECS, []{
 		updateData();
+        screen = Weather;
         drawScreen();
 	}, TIME_SECONDS);
 }
