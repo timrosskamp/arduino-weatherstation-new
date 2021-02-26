@@ -1,44 +1,29 @@
 #include "settings.h"
+#include "TFT_Setup.h"
 #include "secrets.h"
+
+#define AA_FONT_SMALL "NotoSansBold15"
+#define AA_FONT_LARGE "NotoSansBold36"
+
+#include <FS.h>
+#include <LittleFS.h>
+#define FlashFS LittleFS
 
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
-#include <MiniGrafx.h>
-#include <ILI9341_SPI.h>
+#include <TFT_eSPI.h>
 #include <IoAbstraction.h>
 #include "OpenWeatherMapOneCall.h"
 
-#include "ArialRounded.h"
-#include "weathericons.h"
 
 
 
-
-#define COLOR_BLACK  0
-#define COLOR_WHITE  1
-#define COLOR_YELLOW 2
-#define COLOR_BLUE   3
-
-// defines the colors usable in the paletted 16 color frame buffer
-uint16_t palette[] = {
-    0x0000,  // BLACK
-    0xFFFF,  // WHITE
-    0xED84,  // #f0b429 - YELLOW
-    0x5D7C   // #62B0E8 - BLUE
-};
-
-int SCREEN_WIDTH = 240;
-int SCREEN_HEIGHT = 320;
-
-// Limited to 4 colors due to memory constraints
-int BITS_PER_PIXEL = 2; // 2^2 = 4 colors
-
-ADC_MODE(ADC_VCC);
+#define COLOR_YELLOW 0xFD40 // 255, 172, 7
+#define COLOR_PURPLE 0x6136 // 104, 38, 183
 
 IoAbstractionRef ioDevice = ioUsingArduino();
 
-ILI9341_SPI tft = ILI9341_SPI(TFT_CS, TFT_DC);
-MiniGrafx gfx = MiniGrafx(&tft, BITS_PER_PIXEL, palette);
+TFT_eSPI tft = TFT_eSPI();
 
 OpenWeatherMapOneCallData weather;
 
@@ -49,19 +34,158 @@ int screen = 0;
 int screenCount = 2;
 
 
-// Progress bar helper
-void writeProgress(uint8_t percentage, String text) {
-    gfx.fillBuffer(COLOR_BLACK);
-    gfx.setFont(ArialRoundedMTBold_14);
-    gfx.setTextAlignment(TEXT_ALIGN_CENTER);
-    gfx.setColor(COLOR_YELLOW);
-    gfx.drawString(120, 146, text);
-    gfx.setColor(COLOR_WHITE);
-    gfx.drawRect(10, 168, 220, 15);
-    gfx.setColor(COLOR_BLUE);
-    gfx.fillRect(12, 170, 216 * percentage / 100, 11);
 
-    gfx.commit();
+String getIconForWeatherId(int id, bool large) {
+    String suffix = large ? "100x.bmp" : "50x.bmp";
+
+    // Clear & Clouds
+    if( id >= 800 ){
+        if( id == 800 ){
+            return "/clear-" + suffix; // clear
+        }
+        else if( id <= 802 ){
+            return "/few-clouds-" + suffix; // light clouds
+        }
+        else if( id <= 804 ){
+            return "/clouds-" + suffix; // heavy clouds
+        }
+    }
+    // Atmosphere 
+    else if( id >= 700 ){
+        return "/mist-" + suffix;
+    }
+    // Snow
+    else if( id >= 600 ){
+        return "/snow-" + suffix;
+    }
+    // Rain
+    else if( id >= 500 ){
+        // light rain or moderate rain
+        if( id <= 502 ){
+            return "/shower-rain-" + suffix;
+        }
+        // freezing rain
+        else if( id == 511 ){
+            return "/snow-" + suffix;
+        }
+        // heavy intensity rain, very heavy rain or shower rain
+        else{
+            return "/rain-" + suffix;
+        }
+    }
+    // Drizzle
+    else if( id >= 300 ){
+        // light intensity drizzle, drizzle, light intensity drizzle rain or drizzle rain
+        if( id == 300 || id == 301 || id == 310 || id == 311 ){
+            return "/shower-rain-" + suffix;
+        }
+        else{
+            return "/rain-" + suffix;
+        }
+    }
+    // Thunderstorm
+    else if( id >= 200 ){
+        return "/thunder-" + suffix;
+    }
+
+    return "";
+}
+
+// These read 16- and 32-bit types from the SD card file.
+// BMP data is stored little-endian, Arduino is little-endian too.
+// May need to reverse subscript order if porting elsewhere.
+
+uint16_t read16(fs::File &f) {
+  uint16_t result;
+  ((uint8_t *)&result)[0] = f.read(); // LSB
+  ((uint8_t *)&result)[1] = f.read(); // MSB
+  return result;
+}
+
+uint32_t read32(fs::File &f) {
+  uint32_t result;
+  ((uint8_t *)&result)[0] = f.read(); // LSB
+  ((uint8_t *)&result)[1] = f.read();
+  ((uint8_t *)&result)[2] = f.read();
+  ((uint8_t *)&result)[3] = f.read(); // MSB
+  return result;
+}
+
+// Bodmer's streamlined x2 faster "no seek" version
+void drawBmp(String filename, uint16_t x, uint16_t y, TFT_eSPI *_tft) {
+    if( (x >= _tft->width()) || (y >= _tft->height())) return;
+
+    fs::File bmpFS;
+
+    // Check file exists and open it
+    Serial.println(filename);
+
+    if( !LittleFS.exists(filename) ) filename = "/missing.bmp";
+
+    if( !LittleFS.exists(filename) ) return; // all is lost, if not even the missing.bmp exists
+
+    // Open requested file
+    bmpFS = LittleFS.open(filename, "r");
+
+    uint32_t seekOffset;
+    uint16_t w, h, row, col;
+    uint8_t  r, g, b;
+
+    if (read16(bmpFS) == 0x4D42)
+    {
+        read32(bmpFS);
+        read32(bmpFS);
+        seekOffset = read32(bmpFS);
+        read32(bmpFS);
+        w = read32(bmpFS);
+        h = read32(bmpFS);
+
+        if ((read16(bmpFS) == 1) && (read16(bmpFS) == 24) && (read32(bmpFS) == 0))
+        {
+            y += h - 1;
+
+            _tft->setSwapBytes(true);
+            bmpFS.seek(seekOffset);
+
+            // Calculate padding to avoid seek
+            uint16_t padding = (4 - ((w * 3) & 3)) & 3;
+            uint8_t lineBuffer[w * 3 + padding];
+
+            for (row = 0; row < h; row++) {
+                
+                bmpFS.read(lineBuffer, sizeof(lineBuffer));
+                uint8_t*  bptr = lineBuffer;
+                uint16_t* tptr = (uint16_t*)lineBuffer;
+                // Convert 24 to 16 bit colours using the same line buffer for results
+                for (col = 0; col < w; col++)
+                {
+                    b = *bptr++;
+                    g = *bptr++;
+                    r = *bptr++;
+                    *tptr++ = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+                }
+
+                // Push the pixel row to screen, pushImage will crop the line if needed
+                // y is decremented as the BMP image is drawn bottom up
+                _tft->pushImage(x, y--, w, 1, (uint16_t*)lineBuffer);
+            }
+        }
+        else Serial.println("BMP format not recognized.");
+    }
+    bmpFS.close();
+}
+
+// Progress bar helper
+void drawProgress(uint8_t percentage, String text) {
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextDatum(BC_DATUM);
+    tft.loadFont(AA_FONT_SMALL, LittleFS);
+    tft.drawString(text, 120, 160);
+
+    tft.drawRoundRect(10, 168, 220, 15, 4, TFT_WHITE);
+    tft.fillRoundRect(12, 170, 216 * percentage / 100.0, 11, 2, TFT_BLUE);
+
+    tft.unloadFont();
 }
 
 void connectWifi() {
@@ -79,12 +203,14 @@ void connectWifi() {
     while( WiFi.status() != WL_CONNECTED ){
         delay(500);
         if( i > 80 ) i = 0;
-        writeProgress(i, "Connecting to WiFi...");
+        tft.fillScreen(TFT_BLACK);
+        drawProgress(i, "Connecting to WiFi...");
         i += 10;
         Serial.print(".");
     }
 
-    writeProgress(100, "Connected to WiFi.");
+    tft.fillScreen(TFT_BLACK);
+    drawProgress(100, "Connected to WiFi.");
 
     Serial.println();
     Serial.print("Connected, IP address: ");
@@ -95,13 +221,14 @@ void connectWifi() {
 
 void updateWeatherData() {
     OpenWeatherMapOneCall *oneCallClient = new OpenWeatherMapOneCall();
-    oneCallClient->setMetric(IS_METRIC);
+    oneCallClient->setMetric(true);
     oneCallClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
     oneCallClient->update(&weather, OPEN_WEATHER_MAP_APP_ID, OPEN_WEATHER_MAP_LOCATTION_LAT, OPEN_WEATHER_MAP_LOCATTION_LON);
 }
 
 void updateData() {
-    writeProgress(50, "Updating weather...");
+    tft.fillScreen(TFT_BLACK);
+    drawProgress(50, "Updating weather...");
 
     updateWeatherData();
 }
@@ -117,41 +244,39 @@ int8_t getWifiQuality() {
     }
 }
 
+
 void drawWifiQuality() {
     int8_t quality = getWifiQuality();
-
-    gfx.setColor(COLOR_WHITE);
-    // gfx.setFont(ArialMT_Plain_10);
-    // gfx.setTextAlignment(TEXT_ALIGN_RIGHT);  
-    // gfx.drawString(226, 6, String(quality) + "%");
 
     for( int8_t i = 0; i < 4; i++ ){
         for( int8_t j = 0; j < 2 * (i + 1); j++ ){
             if( quality > i * 25 || j == 0 ){
-                gfx.setPixel(228 + 2 * i, 15 - j);
+                // gfx.setPixel(228 + 2 * i, 15 - j);
+                tft.drawPixel(228 + 2 * i, 15 - j, TFT_WHITE);
             }
         }
     }
 }
 
 void drawCurrentWeather() {
-    gfx.setTransparentColor(COLOR_BLACK);
-    gfx.drawPalettedBitmapFromPgm(0, 85, getMeteoconIconFromProgmem(weather.current.weatherIcon));
-    
-    gfx.setFont(ArialRoundedMTBold_14);
-    gfx.setColor(COLOR_BLUE);
-    gfx.setTextAlignment(TEXT_ALIGN_RIGHT);
-    gfx.drawString(220, 95, DISPLAYED_CITY_NAME);
+    // gfx.setTransparentColor(COLOR_BLACK);
+    // gfx.drawPalettedBitmapFromPgm(0, 85, getMeteoconIconFromProgmem(weather.current.weatherIcon));
+    drawBmp(getIconForWeatherId(weather.current.weatherId, true), 10, 76, &tft);
 
-    gfx.setFont(ArialRoundedMTBold_36);
-    gfx.setColor(COLOR_WHITE);
-    gfx.setTextAlignment(TEXT_ALIGN_RIGHT);
-    gfx.drawString(220, 108, String(weather.current.temp, 1) + (IS_METRIC ? "°C" : "°F"));
+    tft.loadFont(AA_FONT_SMALL, LittleFS);
+    tft.setTextDatum(TR_DATUM);
+    tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    tft.drawString(DISPLAYED_CITY_NAME, 220, 95);
 
-    gfx.setFont(ArialRoundedMTBold_14);
-    gfx.setColor(COLOR_YELLOW);
-    gfx.setTextAlignment(TEXT_ALIGN_RIGHT);
-    gfx.drawStringMaxWidth(220, 148, 120, weather.current.weatherDescription);
+    tft.loadFont(AA_FONT_LARGE, LittleFS);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString(String(weather.current.temp, 1) + " C", 220, 114);
+
+    tft.loadFont(AA_FONT_SMALL, LittleFS);
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.drawString(weather.current.weatherDescription, 220, 148);
+
+    tft.unloadFont();
 }
 
 // draws the clock
@@ -161,40 +286,47 @@ void drawTime() {
     time(&now);
     localtime_r(&now, &timeinfo);
 
-    gfx.setTextAlignment(TEXT_ALIGN_CENTER);
-    gfx.setFont(ArialRoundedMTBold_14);
-    gfx.setColor(COLOR_WHITE);
-    String date = WDAY_NAMES[timeinfo.tm_wday] + " " + MONTH_NAMES[timeinfo.tm_mon] + " " + String(timeinfo.tm_mday) + " " + String(1900 + timeinfo.tm_year);
-    gfx.drawString(120, 21, date);
+    tft.setTextDatum(TC_DATUM);
+    tft.loadFont(AA_FONT_SMALL, LittleFS);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    String date = WDAY_NAMES[timeinfo.tm_wday] + ", " + String(timeinfo.tm_mday) + ". " + MONTH_NAMES[timeinfo.tm_mon] + " " + String(1900 + timeinfo.tm_year);
+    tft.drawString(date, 120, 21);
 
-    gfx.setFont(ArialRoundedMTBold_36);
+    tft.setTextDatum(TC_DATUM);
+    tft.loadFont(AA_FONT_LARGE, LittleFS);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
     sprintf(time_str, "%02d:%02d\n", timeinfo.tm_hour, timeinfo.tm_min);
-    gfx.drawString(120, 35, time_str);
+    tft.drawString(time_str, 120, 37);
+
+    tft.unloadFont();
 }
 
 void drawForecastColumn(uint16_t x, uint16_t y, uint8_t dayIndex) {
     OpenWeatherMapOneCallDailyData day = weather.daily[dayIndex];
 
-    gfx.setColor(COLOR_YELLOW);
-    gfx.setFont(ArialRoundedMTBold_14);
-    gfx.setTextAlignment(TEXT_ALIGN_CENTER);
+    tft.loadFont(AA_FONT_SMALL, LittleFS);
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
     time_t time = day.dt;
     struct tm *timeinfo = localtime(&time);
-    gfx.drawString(x + 25, y - 15, WDAY_NAMES[timeinfo->tm_wday]);
+    tft.drawString(WDAY_NAMES[timeinfo->tm_wday], x + 25, y - 15);
 
-    gfx.setColor(COLOR_WHITE);
-    gfx.drawString(x + 25, y + 5, String(day.tempDay, 0) + (IS_METRIC ? "°C" : "°F"));
-    gfx.setColor(COLOR_BLUE);
-    gfx.drawString(x + 25, y + 20, String(day.tempNight, 0) + (IS_METRIC ? "°C" : "°F"));
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.drawString(String(day.tempDay, 0) + " C", x + 25, y + 5);
+    tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    tft.drawString(String(day.tempNight, 0) + " C", x + 25, y + 20);
 
-    gfx.drawPalettedBitmapFromPgm(x, y + 35, getMiniMeteoconIconFromProgmem(day.weatherIcon));
-    gfx.setColor(COLOR_BLUE);
+    drawBmp(getIconForWeatherId(day.weatherId, false), x, y + 35, &tft);
+
+    tft.setTextColor(TFT_BLUE, TFT_BLACK);
 
     if( day.snow ){
-        gfx.drawString(x + 25, y + 80, String(day.snow, 1) + (IS_METRIC ? "mm" : "in"));
+        tft.drawString(String(day.snow, 1) + "mm", x + 25, y + 80);
     }else if( day.rain ){
-        gfx.drawString(x + 25, y + 80, String(day.rain, 1) + (IS_METRIC ? "mm" : "in"));
+        tft.drawString(String(day.rain, 1) + "mm", x + 25, y + 80);
     }
+
+    tft.unloadFont();
 }
 
 /**
@@ -213,8 +345,6 @@ float interpolate(float y0, float y1, float y2, float y3, float mu) {
 }
 
 void drawHourlyForecastGraph() {
-    gfx.setColor(COLOR_BLUE);
-
     float tmin = weather.hourly[0].temp;
     float tmax = weather.hourly[0].temp;
 
@@ -233,7 +363,7 @@ void drawHourlyForecastGraph() {
     // temperature delta
     float tdelta = fabs(tmax - tmin);
     // stretch factor for the graph. 1° = 3px, but 40px is max height.
-    float tscale = min(3, 40 / tdelta);
+    float tscale = min(3.0F, 40 / tdelta);
 
     // y-coord for every temperature each hour.
     float tycoords[25] = {};
@@ -254,13 +384,14 @@ void drawHourlyForecastGraph() {
 
             int y = interpolate(y0, y1, y2, y3, mu);
 
-            gfx.drawVerticalLine(x, y, 320 - y);
+            // gfx.drawVerticalLine(x, y, 320 - y);
+            tft.drawLine(x, y, x, 320, TFT_BLUE);
         }
     }
 
-    gfx.setColor(COLOR_WHITE);
-    gfx.setFont(ArialRoundedMTBold_14);
-    gfx.setTextAlignment(TEXT_ALIGN_CENTER);
+    tft.loadFont(AA_FONT_SMALL, LittleFS);
+    tft.setTextDatum(BC_DATUM);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
 
     for( int i = 0; i < 6; i++ ){
         // index in the forecast array
@@ -270,11 +401,10 @@ void drawHourlyForecastGraph() {
         int tymin = min(min(tycoords[j], tycoords[j+1]), tycoords[j-1]);
         int x = i * 40 + 20;
 
-        gfx.drawString(x, tymin - 20, String(t, 0));
+        tft.drawString(String(t, 0), x, tymin - 10);
     }
 
-    gfx.setTransparentColor(COLOR_BLUE);
-    gfx.setColor(COLOR_BLACK);
+    tft.setTextColor(TFT_WHITE, TFT_BLUE);
 
     char time_str[11];
 
@@ -285,14 +415,14 @@ void drawHourlyForecastGraph() {
         int x = i * 80 + 40;
 
         sprintf(time_str, "%02d:%02d\n", timeinfo->tm_hour, timeinfo->tm_min);
-        gfx.drawString(x, 300, time_str);
+        tft.drawString(time_str, x, 310);
     }
 
-    gfx.setTransparentColor(COLOR_BLACK);
+    tft.unloadFont();
 }
 
 void drawScreen() {
-    gfx.fillBuffer(COLOR_BLACK);
+    tft.fillScreen(TFT_BLACK);
 
     if( screen == 0 ){
         drawWifiQuality();
@@ -308,22 +438,34 @@ void drawScreen() {
         drawForecastColumn(95, 200, 5);
         drawForecastColumn(180, 200, 6);
     }
-
-    gfx.commit();
 }
 
 void setup() {
     Serial.begin(115200);
+    Serial.println();
 
-    ioDevicePinMode(ioDevice, TFT_LED, OUTPUT);
+    if( !LittleFS.begin() ){
+        Serial.println("Flash FS initialisation failed!");
+        while(1) yield(); // Stay here twiddling thumbs waiting
+    }
+    Serial.println("Flash FS available!");
+
+    if( !LittleFS.exists("/NotoSansBold15.vlw") ||
+        !LittleFS.exists("/NotoSansBold36.vlw") ){
+        Serial.println("Fonts missing in Flash FS, did you upload it?");
+        while(1) yield(); // Stay here twiddling thumbs waiting
+    }
+    else Serial.println("Fonts found OK.");
+
+    // ioDevicePinMode(ioDevice, TFT_LED, OUTPUT);
     switches.initialise(ioDevice, true);
 
     // Turn on the background LED
-    ioDeviceDigitalWriteS(ioDevice, TFT_LED, HIGH);
+    // ioDeviceDigitalWriteS(ioDevice, TFT_LED, HIGH);
 
-    gfx.init();
-    gfx.fillBuffer(COLOR_BLACK);
-    gfx.commit();
+    tft.begin();
+    tft.setRotation(0);
+    tft.fillScreen(TFT_BLACK);
 
     configTime(LOCAL_TIMEZONE, NTP_SERVERS);
 

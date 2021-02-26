@@ -42,24 +42,8 @@ const String SUN_MOON_TEXT[] = {"Sun", "Rise", "Set", "Moon", "Age", "Illum"};
 const String MOON_PHASES[] = {"New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous",
                               "Full Moon", "Waning Gibbous", "Third quarter", "Waning Crescent"};
 
-// Settings for Boston
-// #define UTC_OFFSET -5
-// struct dstRule StartRule = {"EDT", Second, Sun, Mar, 2, 3600}; // Eastern Daylight time = UTC/GMT -4 hours
-// struct dstRule EndRule = {"EST", First, Sun, Nov, 1, 0};       // Eastern Standard time = UTC/GMT -5 hour
-
-// values in metric or imperial system?
-const boolean IS_METRIC = true;
-
-// Change for 12 Hour/ 24 hour style clock
-bool IS_STYLE_12HR = false;
-
 #define LOCAL_TIMEZONE TZ_Europe_Berlin
 #define NTP_SERVERS "0.de.pool.ntp.org", "1.de.pool.ntp.org", "2.de.pool.ntp.org"
 
 // August 1st, 2018
 #define NTP_MIN_VALID_EPOCH 1533081600
-
-// Pins for the ILI9341
-#define TFT_DC D2
-#define TFT_CS D1
-#define TFT_LED D8
