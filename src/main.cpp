@@ -34,11 +34,11 @@ tm timeinfo;
 enum Screens {
     Progress,
     Weather,
+    Sun,
     Forecast
 };
 
 Screens screen = Weather;
-int screenCount = 3;
 
 
 
@@ -456,6 +456,73 @@ void drawHourlyForecastGraph() {
     tft.unloadFont();
 }
 
+// Sinuskurve mit Nullstellen bei x=0, x=1 und Hochpunkt bei (0.5|1).
+float sineHill(float x) {
+    return 0.5 * sin(2 * PI * x - HALF_PI) + 0.5;
+}
+
+void drawSunForecast() {
+    const int G_y = 220;
+    const int G_h = 80;
+    const int G_horz_isect_x = 240 * 0.2;
+    const int G_horz_isect_h = sineHill(((float) G_horz_isect_x) / 240) * G_h;
+
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    time_t sunrise = weather.current.sunrise;
+    tm sunriseinfo;
+    localtime_r(&sunrise, &sunriseinfo);
+
+    time_t sunset = weather.current.sunset;
+    tm sunsetinfo;
+    localtime_r(&sunset, &sunsetinfo);
+
+    char time_str[11];
+
+    tft.loadFont(AA_FONT_SMALL);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextDatum(BC_DATUM);
+
+    sprintf(time_str, "%02d:%02d\n", sunriseinfo.tm_hour, sunriseinfo.tm_min);
+    tft.drawString(time_str, G_horz_isect_x, G_y - G_h + 4);
+
+    sprintf(time_str, "%02d:%02d\n", sunsetinfo.tm_hour, sunsetinfo.tm_min);
+    tft.drawString(time_str, 240 - G_horz_isect_x, G_y - G_h + 4);
+
+    float x_sun;
+
+    if( sunrise > now ){
+        // sun is yet to rise
+        float prog = 1 - (float)(sunrise - now) / (float)(sunriseinfo.tm_hour * 3600 + sunriseinfo.tm_min * 60 + sunriseinfo.tm_sec);
+        x_sun = G_horz_isect_x * prog;
+    }else if( sunset > now ) {
+        // sun has risen, is yet to set
+        float prog_day = (float)(now - sunrise) / (float)(sunset - sunrise);
+        x_sun = G_horz_isect_x + (240 - G_horz_isect_x * 2) * prog_day;
+    }else{
+        // sun has set
+        float prog = (float)(now - sunset) / (float)((24 - sunsetinfo.tm_hour) * 3600 + (60 - sunsetinfo.tm_min) * 60 + 60 - sunsetinfo.tm_sec);
+        x_sun = 240 - G_horz_isect_x + G_horz_isect_x * prog;
+    }
+
+    // draw vertical lines starting from horizon/sunline intersections
+    tft.drawLine(G_horz_isect_x, G_y - G_h + 10, G_horz_isect_x, G_y - G_horz_isect_h, COLOR_BLUE);
+    tft.drawLine(240 - G_horz_isect_x, G_y - G_h + 10, 240 - G_horz_isect_x, G_y - G_horz_isect_h, COLOR_BLUE);
+    
+    // draw horizon
+    tft.drawLine(0, G_y - G_horz_isect_h, 240, G_y - G_horz_isect_h, TFT_WHITE);
+    
+    // draw sunline
+    for( int x = 0; x < 240; x++ ){
+        float y = G_y - sineHill(((float) x) / 240) * G_h;
+        tft.drawPixel(x, y, TFT_WHITE);
+    }
+
+    // draw sun
+    tft.fillCircle(x_sun, G_y - sineHill(((float) x_sun) / 240) * G_h, 8, COLOR_YELLOW);
+}
+
 void drawScreen() {
     tft.fillScreen(TFT_BLACK);
 
@@ -464,6 +531,10 @@ void drawScreen() {
         drawTime();
         drawCurrentWeather();
         drawHourlyForecastGraph();
+    }else if( screen == Sun ) {
+        drawWifiQuality();
+        drawTime();
+        drawSunForecast();
     }else if( screen == Forecast ){
         drawWifiQuality();
         drawForecastColumn(10, 60, 1);
@@ -514,7 +585,7 @@ void setup() {
     Serial.println("Current time: " + String(now));
 
     updateData();
-    screen = Weather;
+    screen = Sun;
     drawScreen();
 
     switches.addSwitch(D4, [](uint8_t pin, bool held){
@@ -522,6 +593,9 @@ void setup() {
             ESP.deepSleep(0);
         }else{
             if( screen == Weather ){
+                screen = Sun;
+                drawScreen();
+            }else if( screen == Sun ){
                 screen = Forecast;
                 drawScreen();
             }else if( screen == Forecast ){
@@ -536,11 +610,11 @@ void setup() {
 
     // Wait until a minute just passed.
     taskManager.scheduleOnce((unsigned int) 62 - timeinfo.tm_sec, []{
-        if( screen == Weather ){
+        if( screen == Weather || screen == Sun ){
             updateTime();
         }
         taskManager.scheduleFixedRate(60, []{
-            if( screen == Weather ){
+            if( screen == Weather || screen == Sun ){
                 updateTime();
             }
         }, TIME_SECONDS);
