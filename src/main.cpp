@@ -482,13 +482,14 @@ void drawSunForecast() {
 
     tft.loadFont(AA_FONT_SMALL);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextDatum(BC_DATUM);
 
+    tft.setTextDatum(BL_DATUM);
     sprintf(time_str, "%02d:%02d\n", sunriseinfo.tm_hour, sunriseinfo.tm_min);
-    tft.drawString(time_str, G_horz_isect_x, G_y - G_h + 4);
+    tft.drawString(time_str, 10, G_y - G_h + 10);
 
+    tft.setTextDatum(BR_DATUM);
     sprintf(time_str, "%02d:%02d\n", sunsetinfo.tm_hour, sunsetinfo.tm_min);
-    tft.drawString(time_str, 240 - G_horz_isect_x, G_y - G_h + 4);
+    tft.drawString(time_str, 230, G_y - G_h + 10);
 
     float x_sun;
 
@@ -505,19 +506,28 @@ void drawSunForecast() {
         float prog = (float)(now - sunset) / (float)((24 - sunsetinfo.tm_hour) * 3600 + (60 - sunsetinfo.tm_min) * 60 + 60 - sunsetinfo.tm_sec);
         x_sun = 240 - G_horz_isect_x + G_horz_isect_x * prog;
     }
-
-    // draw vertical lines starting from horizon/sunline intersections
-    tft.drawLine(G_horz_isect_x, G_y - G_h + 10, G_horz_isect_x, G_y - G_horz_isect_h, COLOR_BLUE);
-    tft.drawLine(240 - G_horz_isect_x, G_y - G_h + 10, 240 - G_horz_isect_x, G_y - G_horz_isect_h, COLOR_BLUE);
-    
-    // draw horizon
-    tft.drawLine(0, G_y - G_horz_isect_h, 240, G_y - G_horz_isect_h, TFT_WHITE);
     
     // draw sunline
     for( int x = 0; x < 240; x++ ){
         float y = G_y - sineHill(((float) x) / 240) * G_h;
+
+        if( x < x_sun ){
+            int color;
+
+            if( x > G_horz_isect_x && x < 240 - G_horz_isect_x ){
+                color = COLOR_BLUE;
+            }else{
+                color = COLOR_PURPLE;
+            }
+
+            tft.drawLine(x, G_y - G_horz_isect_h, x, y, color);
+        }
+
         tft.drawPixel(x, y, TFT_WHITE);
     }
+
+    // draw horizon
+    tft.drawLine(0, G_y - G_horz_isect_h, 240, G_y - G_horz_isect_h, TFT_WHITE);
 
     // draw sun
     tft.fillCircle(x_sun, G_y - sineHill(((float) x_sun) / 240) * G_h, 8, COLOR_YELLOW);
@@ -563,11 +573,14 @@ void setup() {
     }
     else Serial.println("Fonts found OK.");
 
-    // ioDevicePinMode(ioDevice, TFT_LED, OUTPUT);
+    pinMode(D1, OUTPUT);
+    digitalWrite(D1, HIGH);
+
+    // ioDevicePinMode(ioDevice, D1, OUTPUT);
     switches.initialise(ioDevice, true);
 
     // Turn on the background LED
-    // ioDeviceDigitalWriteS(ioDevice, TFT_LED, HIGH);
+    // ioDeviceDigitalWriteS(ioDevice, D1, HIGH);
 
     tft.begin();
     tft.setRotation(0);
@@ -621,8 +634,9 @@ void setup() {
     }, TIME_SECONDS);
 
     taskManager.scheduleFixedRate(UPDATE_INTERVAL_SECS, []{
+        auto lastScreen = screen;
 		updateData();
-        screen = Weather;
+        screen = lastScreen;
         drawScreen();
 	}, TIME_SECONDS);
 }
