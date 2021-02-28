@@ -535,21 +535,30 @@ void drawSunForecast() {
         float y = G_y - sineHill(((float) x) / 240) * G_h;
         double y_floor;
         double y_decimal = modf((double) y, &y_floor);
+        bool gtHorizon = x > G_horz_isect_x && x < 240 - G_horz_isect_x;
 
-        // if( x < x_sun ){
-        //     int color;
+        if( x < x_sun ){
+            int color;
 
-        //     if( x > G_horz_isect_x && x < 240 - G_horz_isect_x ){
-        //         color = COLOR_BLUE;
-        //     }else{
-        //         color = COLOR_PURPLE;
-        //     }
+            if( gtHorizon ){
+                color = COLOR_BLUE;
+            }else{
+                color = COLOR_PURPLE;
+            }
 
-        //     tft.drawLine(x, G_y - G_horz_isect_h, x, y_floor, color);
-        // }
+            tft.drawLine(x, G_y - G_horz_isect_h, x, y_floor, color);
 
-        tft.drawPixel(x, y_floor, alphaBlend((1 - y_decimal) * 255, TFT_WHITE, TFT_BLACK));
-        tft.drawPixel(x, y_floor + 1, alphaBlend(y_decimal * 255, TFT_WHITE, TFT_BLACK));
+            if( gtHorizon ){
+                tft.drawPixel(x, y_floor, alphaBlend((1 - y_decimal) * 255, TFT_WHITE, TFT_BLACK));
+                tft.drawPixel(x, y_floor + 1, alphaBlend(y_decimal * 255, TFT_WHITE, color));
+            }else{
+                tft.drawPixel(x, y_floor, alphaBlend((1 - y_decimal) * 255, TFT_WHITE, color));
+                tft.drawPixel(x, y_floor + 1, alphaBlend(y_decimal * 255, TFT_WHITE, TFT_BLACK));
+            }
+        }else{
+            tft.drawPixel(x, y_floor, alphaBlend((1 - y_decimal) * 255, TFT_WHITE, TFT_BLACK));
+            tft.drawPixel(x, y_floor + 1, alphaBlend(y_decimal * 255, TFT_WHITE, TFT_BLACK));
+        }
     }
 
     // draw horizon
@@ -624,7 +633,7 @@ void setup() {
     Serial.println("Current time: " + String(now));
 
     updateData();
-    screen = Weather;
+    screen = Sun;
     drawScreen();
 
     switches.addSwitch(D4, [](uint8_t pin, bool held){
