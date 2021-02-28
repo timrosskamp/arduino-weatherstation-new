@@ -404,7 +404,7 @@ void drawHourlyForecastGraph() {
     float tmin = weather.hourly[0].temp;
     float tmax = weather.hourly[0].temp;
 
-    for( int b = 1; b < 25; b++ ){
+    for( int b = 1; b < 13; b++ ){
         float t = weather.hourly[b].temp;
 
         if( tmin > t ){
@@ -422,21 +422,21 @@ void drawHourlyForecastGraph() {
     float tscale = min(3.0F, 40 / tdelta);
 
     // y-coord for every temperature each hour.
-    float tycoords[25] = {};
+    float tycoords[13] = {};
 
-    for( int b = 0; b < 25; b++ ){
+    for( int b = 0; b < 13; b++ ){
         float t = weather.hourly[b].temp;
         tycoords[b] = 240 - (t - tmin) * tscale;
     }
 
-    for( int b = 0; b < 24; b++ ){
-        for( int l = 0; l < 10; l++ ){
-            int x = b * 10 + l;
-            float mu = (float) l / 9;
+    for( int b = 0; b < 12; b++ ){
+        for( int l = 0; l < 20; l++ ){
+            int x = b * 20 + l;
+            float mu = (float) l / 19;
             float y0 = tycoords[max(0, b - 1)];
             float y1 = tycoords[b];
             float y2 = tycoords[b + 1];
-            float y3 = tycoords[min(23, b + 2)];
+            float y3 = tycoords[min(12, b + 2)];
 
             float y = interpolate(y0, y1, y2, y3, mu);
 
@@ -453,7 +453,7 @@ void drawHourlyForecastGraph() {
 
     for( int i = 0; i < 6; i++ ){
         // index in the forecast array
-        int j = i * 4 + 2;
+        int j = i * 2 + 1;
         float t = weather.hourly[j].temp;
         // minimum y-coord in current, last and next temperature
         int tymin = min(min(tycoords[j], tycoords[j+1]), tycoords[j-1]);
@@ -467,7 +467,7 @@ void drawHourlyForecastGraph() {
     char time_str[11];
 
     for( int i = 0; i < 3; i++ ){
-        int j = i * 8 + 4;
+        int j = i * 4 + 2;
         time_t time = weather.hourly[j].dt;
         struct tm *timeinfo = localtime(&time);
         int x = i * 80 + 40;
