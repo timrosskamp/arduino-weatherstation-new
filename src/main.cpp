@@ -38,7 +38,7 @@ enum Screens {
     Forecast
 };
 
-Screens screen = Weather;
+Screens screen;
 
 
 
@@ -116,6 +116,27 @@ uint32_t read32(fs::File &f) {
   ((uint8_t *)&result)[2] = f.read();
   ((uint8_t *)&result)[3] = f.read(); // MSB
   return result;
+}
+
+uint16_t alphaBlend(uint8_t alpha, uint16_t fgc, uint16_t bgc) {
+    // For speed use fixed point maths and rounding to permit a power of 2 division
+    uint16_t fgR = ((fgc >> 10) & 0x3E) + 1;
+    uint16_t fgG = ((fgc >>  4) & 0x7E) + 1;
+    uint16_t fgB = ((fgc <<  1) & 0x3E) + 1;
+
+    uint16_t bgR = ((bgc >> 10) & 0x3E) + 1;
+    uint16_t bgG = ((bgc >>  4) & 0x7E) + 1;
+    uint16_t bgB = ((bgc <<  1) & 0x3E) + 1;
+
+    // Shift right 1 to drop rounding bit and shift right 8 to divide by 256
+    uint16_t r = (((fgR * alpha) + (bgR * (255 - alpha))) >> 9);
+    uint16_t g = (((fgG * alpha) + (bgG * (255 - alpha))) >> 9);
+    uint16_t b = (((fgB * alpha) + (bgB * (255 - alpha))) >> 9);
+
+    // Combine RGB565 colours into 16 bits
+    //return ((r&0x18) << 11) | ((g&0x30) << 5) | ((b&0x18) << 0); // 2 bit greyscale
+    //return ((r&0x1E) << 11) | ((g&0x3C) << 5) | ((b&0x1E) << 0); // 4 bit greyscale
+    return (r << 11) | (g << 5) | (b << 0);
 }
 
 // Bodmer's streamlined x2 faster "no seek" version
@@ -417,10 +438,12 @@ void drawHourlyForecastGraph() {
             float y2 = tycoords[b + 1];
             float y3 = tycoords[min(23, b + 2)];
 
-            int y = interpolate(y0, y1, y2, y3, mu);
+            float y = interpolate(y0, y1, y2, y3, mu);
 
-            // gfx.drawVerticalLine(x, y, 320 - y);
-            tft.drawLine(x, y, x, 320, COLOR_BLUE);
+            double y_floor;
+            double y_decimal = modf((double) y, &y_floor);
+            tft.drawPixel(x, y_floor, alphaBlend((1 - y_decimal) * 255, COLOR_BLUE, TFT_BLACK));
+            tft.drawLine(x, y_floor + 1, x, 320, COLOR_BLUE);
         }
     }
 
@@ -449,7 +472,7 @@ void drawHourlyForecastGraph() {
         struct tm *timeinfo = localtime(&time);
         int x = i * 80 + 40;
 
-        sprintf(time_str, "%02d:%02d\n", timeinfo->tm_hour, timeinfo->tm_min);
+        sprintf(time_str, "%02d:%02d", timeinfo->tm_hour, timeinfo->tm_min);
         tft.drawString(time_str, x, 310);
     }
 
@@ -484,11 +507,11 @@ void drawSunForecast() {
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
 
     tft.setTextDatum(BL_DATUM);
-    sprintf(time_str, "%02d:%02d\n", sunriseinfo.tm_hour, sunriseinfo.tm_min);
+    sprintf(time_str, "%02d:%02d", sunriseinfo.tm_hour, sunriseinfo.tm_min);
     tft.drawString(time_str, 10, G_y - G_h + 10);
 
     tft.setTextDatum(BR_DATUM);
-    sprintf(time_str, "%02d:%02d\n", sunsetinfo.tm_hour, sunsetinfo.tm_min);
+    sprintf(time_str, "%02d:%02d", sunsetinfo.tm_hour, sunsetinfo.tm_min);
     tft.drawString(time_str, 230, G_y - G_h + 10);
 
     float x_sun;
@@ -598,7 +621,7 @@ void setup() {
     Serial.println("Current time: " + String(now));
 
     updateData();
-    screen = Sun;
+    screen = Weather;
     drawScreen();
 
     switches.addSwitch(D4, [](uint8_t pin, bool held){
