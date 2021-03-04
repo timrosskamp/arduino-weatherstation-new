@@ -34,11 +34,12 @@ tm timeinfo;
 enum Screens {
     Progress,
     Weather,
+    Precipitation,
     Sun,
     Forecast
 };
 
-Screens screen;
+int screen;
 
 
 
@@ -479,6 +480,10 @@ void drawHourlyForecastGraph() {
     tft.unloadFont();
 }
 
+void drawPrecipitationForecast() {
+    
+}
+
 // Sinuskurve mit Nullstellen bei x=0, x=1 und Hochpunkt bei (0.5|1).
 float sineHill(float x) {
     return 0.5 * sin(2 * PI * x - HALF_PI) + 0.5;
@@ -568,19 +573,40 @@ void drawSunForecast() {
     tft.fillCircle(x_sun, G_y - sineHill(((float) x_sun) / 240) * G_h, 8, COLOR_YELLOW);
 }
 
-void drawScreen() {
-    tft.fillScreen(TFT_BLACK);
+void drawScreen(int newScreen) {
+    if( newScreen == Weather ){
+        tft.fillScreen(TFT_BLACK);
 
-    if( screen == Weather ){
         drawWifiQuality();
         drawTime();
         drawCurrentWeather();
         drawHourlyForecastGraph();
-    }else if( screen == Sun ) {
-        drawWifiQuality();
-        drawTime();
-        drawSunForecast();
-    }else if( screen == Forecast ){
+    }else if( newScreen == Precipitation ) {
+        if( screen == Weather ){
+            // Time, CurretWeather already visible, no need to clear them.
+            tft.fillRect(0, 180, 240, 320 - 180, TFT_BLACK);
+            drawPrecipitationForecast();
+        }else{
+            tft.fillScreen(TFT_BLACK);
+            drawWifiQuality();
+            drawTime();
+            drawCurrentWeather();
+            drawPrecipitationForecast();
+        }
+    }else if( newScreen == Sun ) {
+        if( screen == Precipitation ){
+            // Time already visible, no need to clear them.
+            tft.fillRect(0, 70, 240, 320 - 70, TFT_BLACK);
+            drawSunForecast();
+        }else{
+            tft.fillScreen(TFT_BLACK);
+            drawWifiQuality();
+            drawTime();
+            drawSunForecast();
+        }
+    }else if( newScreen == Forecast ){
+        tft.fillScreen(TFT_BLACK);
+
         drawWifiQuality();
         drawForecastColumn(10, 60, 1);
         drawForecastColumn(95, 60, 2);
@@ -589,6 +615,8 @@ void drawScreen() {
         drawForecastColumn(95, 200, 5);
         drawForecastColumn(180, 200, 6);
     }
+
+    screen = newScreen;
 }
 
 void setup() {
@@ -633,22 +661,16 @@ void setup() {
     Serial.println("Current time: " + String(now));
 
     updateData();
-    screen = Sun;
-    drawScreen();
+    drawScreen(Screens::Weather);
 
     switches.addSwitch(D4, [](uint8_t pin, bool held){
         if( held ){
             ESP.deepSleep(0);
         }else{
-            if( screen == Weather ){
-                screen = Sun;
-                drawScreen();
-            }else if( screen == Sun ){
-                screen = Forecast;
-                drawScreen();
-            }else if( screen == Forecast ){
-                screen = Weather;
-                drawScreen();
+            if( screen >= 4 ){
+                drawScreen(1);
+            }else{
+                drawScreen(screen + 1);
             }
         }
     });
@@ -658,11 +680,11 @@ void setup() {
 
     // Wait until a minute just passed.
     taskManager.scheduleOnce((unsigned int) 62 - timeinfo.tm_sec, []{
-        if( screen == Weather || screen == Sun ){
+        if( screen == Screens::Weather || screen == Screens::Precipitation || screen == Screens::Sun ){
             updateTime();
         }
         taskManager.scheduleFixedRate(60, []{
-            if( screen == Weather || screen == Sun ){
+            if( screen == Screens::Weather || screen == Screens::Precipitation || screen == Screens::Sun ){
                 updateTime();
             }
         }, TIME_SECONDS);
@@ -671,8 +693,7 @@ void setup() {
     taskManager.scheduleFixedRate(UPDATE_INTERVAL_SECS, []{
         auto lastScreen = screen;
 		updateData();
-        screen = lastScreen;
-        drawScreen();
+        drawScreen(lastScreen);
 	}, TIME_SECONDS);
 }
 
