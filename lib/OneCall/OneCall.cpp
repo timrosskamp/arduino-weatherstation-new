@@ -1,12 +1,17 @@
 #include "OneCall.h"
+#include "OneCallData.h"
+#include <OneCallListener.h>
 #include <WiFiClientSecure.h>
+#include <JsonStreamingParser2.h>
 
-OneCall::OneCall(const char* appId) {
+OneCall::OneCall(char *appId) {
     this->appId = appId;
 }
 
-bool OneCall::update(float lat, float lng) {
+bool OneCall::update(OneCallData *data, float lat, float lng) {
     WiFiClientSecure client;
+    JsonStreamingParser parser;
+    auto listener = new OneCallListener(data);
     unsigned long started = millis();
     char path[160];
     char request[260];
@@ -14,6 +19,8 @@ bool OneCall::update(float lat, float lng) {
 
     sprintf(path, "/data/2.5/onecall?lat=%f&lon=%f&exclude=minutely,alerts&units=metric&lang=de&appid=%s", lat, lng, appId);
     sprintf(request, "GET %s HTTP/1.1\r\nHOST: %s\r\nConnection: close\r\n\r\n", path, host);
+
+    parser.setHandler(listener);
 
     client.setInsecure();
 
@@ -25,16 +32,12 @@ bool OneCall::update(float lat, float lng) {
     Serial.println("[HTTP] connected, now getting data");
     client.print(request);
 
-    Serial.println("[HTTP] Headers:");
-
     while( client.connected() ){
         String line = client.readStringUntil('\n');
         if( line == "\r" ){
             // End of headers
             break;
         }
-
-        Serial.println(line);
 
         if( (millis() - started) > 10000 ){
             Serial.println("[HTTP] client timeout during headers");
@@ -43,13 +46,11 @@ bool OneCall::update(float lat, float lng) {
         }
     }
 
-    Serial.println();
-
     while( client.connected() || client.available() > 0 ) {
         while( client.available() > 0 ){
             c = client.read();
 
-            Serial.print(c);
+            parser.parse(c);
         }
 
         if( (millis() - started) > 10000 ){
@@ -63,6 +64,8 @@ bool OneCall::update(float lat, float lng) {
     }
 
     client.stop();
+
+    Serial.println("[HTTP] done");
 
     return true;
 }

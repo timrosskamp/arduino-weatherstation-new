@@ -13,7 +13,7 @@
 #include <ESP8266WiFi.h>
 #include <TFT_eSPI.h>
 #include <IoAbstraction.h>
-#include "OpenWeatherMapOneCall.h"
+#include <OneCall.h>
 
 
 
@@ -26,7 +26,7 @@ IoAbstractionRef ioDevice = ioUsingArduino();
 
 TFT_eSPI tft = TFT_eSPI();
 
-OpenWeatherMapOneCallData weather;
+OneCallData weather;
 
 time_t now;
 tm timeinfo;
@@ -147,7 +147,6 @@ void drawBmp(String filename, uint16_t x, uint16_t y, TFT_eSPI *_tft) {
     fs::File bmpFS;
 
     // Check file exists and open it
-    Serial.println(filename);
 
     if( !LittleFS.exists(filename) ) filename = "/missing.bmp";
 
@@ -265,10 +264,9 @@ void connectWifi() {
 }
 
 void updateWeatherData() {
-    OpenWeatherMapOneCall *oneCallClient = new OpenWeatherMapOneCall();
-    oneCallClient->setMetric(true);
-    oneCallClient->setLanguage(OPEN_WEATHER_MAP_LANGUAGE);
-    oneCallClient->update(&weather, OPEN_WEATHER_MAP_APP_ID, OPEN_WEATHER_MAP_LOCATTION_LAT, OPEN_WEATHER_MAP_LOCATTION_LON);
+    OneCall* weatherClient = new OneCall("374ef841ef355cd8599e06fa0270ee15");
+
+    weatherClient->update(&weather, OPEN_WEATHER_MAP_LOCATTION_LAT, OPEN_WEATHER_MAP_LOCATTION_LON);
 }
 
 void updateData() {
@@ -303,9 +301,7 @@ void drawWifiQuality() {
 }
 
 void drawCurrentWeather() {
-    // gfx.setTransparentColor(COLOR_BLACK);
-    // gfx.drawPalettedBitmapFromPgm(0, 85, getMeteoconIconFromProgmem(weather.current.weatherIcon));
-    drawBmp(getIconForWeatherId(weather.current.weatherId, true), 10, 76, &tft);
+    drawBmp(getIconForWeatherId(weather.current.weather.id, true), 10, 76, &tft);
 
     tft.loadFont(AA_FONT_SMALL, LittleFS);
     tft.setTextDatum(TR_DATUM);
@@ -318,7 +314,7 @@ void drawCurrentWeather() {
 
     tft.loadFont(AA_FONT_SMALL, LittleFS);
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-    tft.drawString(weather.current.weatherDescription, 220, 148);
+    tft.drawString(weather.current.weather.description, 220, 148);
 
     tft.unloadFont();
 }
@@ -359,7 +355,7 @@ void updateTime() {
 }
 
 void drawForecastColumn(uint16_t x, uint16_t y, uint8_t dayIndex) {
-    OpenWeatherMapOneCallDailyData day = weather.daily[dayIndex];
+    auto day = weather.daily[dayIndex];
 
     tft.loadFont(AA_FONT_SMALL, LittleFS);
     tft.setTextDatum(TC_DATUM);
@@ -369,11 +365,11 @@ void drawForecastColumn(uint16_t x, uint16_t y, uint8_t dayIndex) {
     tft.drawString(WDAY_NAMES[timeinfo->tm_wday], x + 25, y - 15);
 
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-    tft.drawString(String(day.tempDay, 0) + " C", x + 25, y + 5);
+    tft.drawString(String(day.temp.day, 0) + " C", x + 25, y + 5);
     tft.setTextColor(COLOR_BLUE, TFT_BLACK);
-    tft.drawString(String(day.tempNight, 0) + " C", x + 25, y + 20);
+    tft.drawString(String(day.temp.night, 0) + " C", x + 25, y + 20);
 
-    drawBmp(getIconForWeatherId(day.weatherId, false), x, y + 35, &tft);
+    drawBmp(getIconForWeatherId(day.weather.id, false), x, y + 35, &tft);
 
     tft.setTextColor(COLOR_BLUE, TFT_BLACK);
 
